@@ -1,41 +1,24 @@
-# spark-hbase-mock
-Hbase mock testing using spark scala test
+# spark-hbase-ingestion
+spark-hbase-ingestion using dataframe
 
 
-Running Hbase Testing Utility On Windows
+/**
+   * method for convert records for inserting into HBase
+   *
+   * @param records
+   * @param cf Column Family
+   * @return
+   */
+  def toHbaseRecords(records: Array[(String, Array[(String, String)])], cf: String): RDD[(Array[Byte], Array[(Array[Byte], Array[Byte], Array[Byte])])] = {
+    sc.parallelize(records.map(x => (ct(x._1), x._2.map(x => (ct(cf), ct(x._1), ct(x._2))))))
+  }
 
-The HBase Testing Utility is a vital tool for anyone writing HBase applications. 
-It sets up (and tears down) a lightweight HBase instance locally to allow local integration tests. 
-I’ve previously discussed this and how to use it with BDD Cucumber tests in this blog post, complete with working repo. 
-However, it is not trivially easy to get working on Windows machines, nor is it documented anywhere.
-
-In this blog post, I’ll show how to get the HBase Testing Utility running on Windows machines, no admin access required. 
-There’s no accompanying GitHub project for this post, as it’s fairly short and generic. 
-I’ll assume you already have a working HBase Testing Utility test that runs on Unix, and you want to port it to Windows.
-
-Download the https://github.com/sardetushar/hadooponwindows
-
-Download/clone Winutils. This contains several Hadoop versions compiled for Windows.
-Go to Control Panel, and find Edit environment variables for your account in System.
-Add the following user variables:
-hadoop.home.dir=<PATH_TO_DESIRED_HADOOP_VERSION> (in my case, this was C:\Users\bwatson\apps\hadoop-2.8.3)
-HADOOP_HOME=<PATH_TO_DESIRED_HADOOP_VERSION> (as above)
-append %HADOOP_HOME%/bin to Path
-
-Before calling new HBaseTestingUtility(); 
-the temporary HBase data directory needs to be set. 
-Add System.setProperty("test.build.data.basedirectory", "C:/Temp/hbase"); to the code. 
-This path can be changed, but it’s important to keep it short. Using the JUnit TemporaryFolder or the default path results in paths 
-too long, and shows an error similar to
-java.io.IOException: Failed to move meta file for ReplicaBeingWritten, blk_1073741825_1001, RBW.
-
-
-
-Put RDD Ex:
-
-
-val hbaseContext = new HBaseContext(sc, config)
-
+  /**
+   * method for inserting bulk rdd in HBase table
+   * @param tableName
+   * @param rdd
+   */
+  def toHbaseBulkPutRDD(tableName: String, rdd: RDD[(Array[Byte], Array[(Array[Byte], Array[Byte], Array[Byte])])])(implicit conf: Configuration): Unit = {
     hbaseContext.bulkPut[(Array[Byte], Array[(Array[Byte], Array[Byte], Array[Byte])])](
       rdd,
       TableName.valueOf(tableName),
@@ -44,16 +27,45 @@ val hbaseContext = new HBaseContext(sc, config)
         putRecord._2.foreach((putValue) => put.addColumn(putValue._1, putValue._2, putValue._3))
         put
       })
-      
-      
-  Get RDD Ex: 
-  
-  
-  val rdd_key = sc.parallelize(Array((Bytes.toBytes("key1")), (Bytes.toBytes("key2"))))
 
-    val getRdd = hbaseContext.bulkGet[Array[Byte], scala.collection.mutable.Map[String, String]](
+  }
+
+  /**
+   * method for inserting bulk dataframe in HBase table . Dataframe rows should be string
+   * @param tableName
+   * @param df
+   * @param rowkeysIndex
+   * @param rowKeyDelimiter
+   * @param cf
+   */
+  def toHbaseBulkPutDataframe(tableName: String, df: DataFrame, rowkeysIndex: Array[Int],
+                              rowKeyDelimiter: String, cf: String)(implicit conf: Configuration) = {
+    try {
+      val h = df.columns.toSeq
+      val v = df.map(x => {
+        x.toSeq.toArray.map(_.toString())
+      }).toArray()
+      val hbaseRDD = toDFToHbaseRDD(h, v, rowkeysIndex, rowKeyDelimiter)(cf)
+      toHbaseBulkPutRDD(tableName, hbaseRDD)
+    } catch {
+      case ex: Exception => throw ex
+    }
+  }
+
+  /**
+   * method for get rdd using row keys
+   *
+   * @param tableName
+   * @param rdd_key   rdd of row_keys
+   * @param batchSize To limit the number of columns if your table has very wide
+   *                  rows (rows with a large number of columns), use setBatch(int batch) and set it to
+   *                  the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
+   * @return
+   */
+  def toHbaseBulkGetRDD(tableName: String, rdd_key: RDD[Array[Byte]], batchSize: Int)(implicit conf: Configuration): RDD[scala.collection.mutable.Map[String, String]] = {
+    hbaseContext.bulkGet[Array[Byte], scala.collection.mutable.Map[String, String]](
       TableName.valueOf(tableName),
-      2,
+      batchSize,
       rdd_key,
       record => {
         new Get(record)
@@ -71,12 +83,65 @@ val hbaseContext = new HBaseContext(sc, config)
         }
         map
       })
-      
-    Converting RDD to Spark DataFrame:
-    
-    val zipRdd = getRdd.filter(!_.isEmpty).map(x => x.toList.sortBy(_._1).unzip)
-    val schema = StructType(zipRdd.first()._1.map(k => StructField(k, StringType, nullable = false)))
-    val rows = zipRdd.map(_._2).map(x => (Row(x: _*)))
+  }
 
-    val priceDF = sqlCtx.createDataFrame(rows, schema)
-    priceDF.show()
+  /**
+   * method for get dataframe using keys
+   *
+   * @param tableName
+   * @param rdd_key   rdd of row_keys
+   * @param batchSize To limit the number of columns if your table has very wide
+   *                  rows (rows with a large number of columns), use setBatch(int batch) and set it to
+   *                  the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
+   * @return
+   */
+  def toHbaseBulkGetDataFrame(tableName: String, rdd_key: RDD[Array[Byte]], batchSize: Int)(implicit conf: Configuration): DataFrame = {
+    val rdd = toHbaseBulkGetRDD(tableName, rdd_key, batchSize)
+    try {
+      val zipRdd = rdd.filter(!_.isEmpty).map(x => x.toList.sortBy(_._1).unzip)
+      val schema = StructType(zipRdd.first()._1.map(k => StructField(k, StringType, nullable = false)))
+      val rows = zipRdd.map(_._2).map(x => (Row(x: _*)))
+      sqlCtx.createDataFrame(rows, schema)
+    } catch {
+      case ex: UnsupportedOperationException => throw ex
+    }
+  }
+
+  /**
+   * @param tableName
+   * @param maxResultSize To specify a maximum result size, use setMaxResultSize(long), with the number of bytes.
+   *                      The goal is to reduce IO and network.
+   * @param cf            column family
+   * @param batchSize     To limit the number of columns if your table has very wide
+   *                      rows (rows with a large number of columns), use setBatch(int batch) and set it to
+   *                      the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
+   * @return
+   */
+  def toHbaseBulkScanDataFrame(tableName: String, maxResultSize: Long, cf: Array[Byte], batchSize: Int)(implicit conf: Configuration): DataFrame = {
+    println("HBASE: toHbaseBulkScanDataFrame...........")
+    val scan = new Scan()
+    scan.setMaxResultSize(maxResultSize)
+    scan.addFamily(cf)
+    println("Scanning hbase............. ")
+    val rdd_key = hbaseContext.hbaseRDD(TableName.valueOf(tableName), scan).map(_._1.get())
+    println("rdd_key:...... " + rdd_key.map(x => Bytes.toString(x)).collect().foreach(println))
+    toHbaseBulkGetDataFrame(tableName, rdd_key, batchSize)
+  }
+
+   /**
+ * @param headers
+ * @param records
+ * @param keys_index
+ * @param rowKeyDelimiter
+ * @return String => RDD
+ */
+def toDFToHbaseRDD(headers: Seq[String], records: Array[Array[String]],keys_index: Array[Int], rowKeyDelimiter: String) = (cf: String) => {
+    sc.parallelize(records.flatMap(x => {
+      val keys = keys_index.map(f => x(f)).mkString(rowKeyDelimiter)
+      Array((keys, Array(headers zip x: _*)))
+    }).map(x => (ct(x._1), x._2.map(x => (ct(cf), ct(x._1), ct(x._2))))))
+
+  }
+
+
+}
