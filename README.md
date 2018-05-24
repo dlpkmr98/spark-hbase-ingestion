@@ -9,6 +9,7 @@ spark-hbase-ingestion using dataframe
    * @param cf Column Family
    * @return
    */
+   
   def toHbaseRecords(records: Array[(String, Array[(String, String)])], cf: String): RDD[(Array[Byte], Array[(Array[Byte], Array[Byte], Array[Byte])])] = {
     sc.parallelize(records.map(x => (ct(x._1), x._2.map(x => (ct(cf), ct(x._1), ct(x._2))))))
   }
@@ -18,6 +19,7 @@ spark-hbase-ingestion using dataframe
    * @param tableName
    * @param rdd
    */
+   
   def toHbaseBulkPutRDD(tableName: String, rdd: RDD[(Array[Byte], Array[(Array[Byte], Array[Byte], Array[Byte])])])(implicit conf: Configuration): Unit = {
     hbaseContext.bulkPut[(Array[Byte], Array[(Array[Byte], Array[Byte], Array[Byte])])](
       rdd,
@@ -38,6 +40,7 @@ spark-hbase-ingestion using dataframe
    * @param rowKeyDelimiter
    * @param cf
    */
+   
   def toHbaseBulkPutDataframe(tableName: String, df: DataFrame, rowkeysIndex: Array[Int],
                               rowKeyDelimiter: String, cf: String)(implicit conf: Configuration) = {
     try {
@@ -58,10 +61,11 @@ spark-hbase-ingestion using dataframe
    * @param tableName
    * @param rdd_key   rdd of row_keys
    * @param batchSize To limit the number of columns if your table has very wide
-   *                  rows (rows with a large number of columns), use setBatch(int batch) and set it to
-   *                  the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
+   * rows (rows with a large number of columns), use setBatch(int batch) and set it to
+   * the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
    * @return
    */
+   
   def toHbaseBulkGetRDD(tableName: String, rdd_key: RDD[Array[Byte]], batchSize: Int)(implicit conf: Configuration): RDD[scala.collection.mutable.Map[String, String]] = {
     hbaseContext.bulkGet[Array[Byte], scala.collection.mutable.Map[String, String]](
       TableName.valueOf(tableName),
@@ -91,10 +95,11 @@ spark-hbase-ingestion using dataframe
    * @param tableName
    * @param rdd_key   rdd of row_keys
    * @param batchSize To limit the number of columns if your table has very wide
-   *                  rows (rows with a large number of columns), use setBatch(int batch) and set it to
-   *                  the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
+   * rows (rows with a large number of columns), use setBatch(int batch) and set it to
+   * the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
    * @return
    */
+   
   def toHbaseBulkGetDataFrame(tableName: String, rdd_key: RDD[Array[Byte]], batchSize: Int)(implicit conf: Configuration): DataFrame = {
     val rdd = toHbaseBulkGetRDD(tableName, rdd_key, batchSize)
     try {
@@ -110,13 +115,14 @@ spark-hbase-ingestion using dataframe
   /**
    * @param tableName
    * @param maxResultSize To specify a maximum result size, use setMaxResultSize(long), with the number of bytes.
-   *                      The goal is to reduce IO and network.
-   * @param cf            column family
-   * @param batchSize     To limit the number of columns if your table has very wide
-   *                      rows (rows with a large number of columns), use setBatch(int batch) and set it to
-   *                      the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
+   * The goal is to reduce IO and network.
+   * @param cf column family
+   * @param batchSize To limit the number of columns if your table has very wide
+   * rows (rows with a large number of columns), use setBatch(int batch) and set it to
+   * the number of columns you want to return in one batch. A large number of columns is not a recommended design pattern
    * @return
    */
+   
   def toHbaseBulkScanDataFrame(tableName: String, maxResultSize: Long, cf: Array[Byte], batchSize: Int)(implicit conf: Configuration): DataFrame = {
     println("HBASE: toHbaseBulkScanDataFrame...........")
     val scan = new Scan()
