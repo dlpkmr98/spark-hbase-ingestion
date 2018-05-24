@@ -1,4 +1,4 @@
-# spark-hbase-ingestion
+spark-hbase-ingestion
 spark-hbase-ingestion using dataframe
 
 
@@ -9,7 +9,6 @@ spark-hbase-ingestion using dataframe
    * @param cf Column Family
    * @return
    */
-   
   def toHbaseRecords(records: Array[(String, Array[(String, String)])], cf: String): RDD[(Array[Byte], Array[(Array[Byte], Array[Byte], Array[Byte])])] = {
     sc.parallelize(records.map(x => (ct(x._1), x._2.map(x => (ct(cf), ct(x._1), ct(x._2))))))
   }
@@ -143,9 +142,4 @@ def toDFToHbaseRDD(headers: Seq[String], records: Array[Array[String]],keys_inde
     }).map(x => (ct(x._1), x._2.map(x => (ct(cf), ct(x._1), ct(x._2))))))
 
   }
-  
-  
-  
 
-
-}
